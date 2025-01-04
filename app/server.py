@@ -77,69 +77,67 @@ class CustomHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                 self.send_error(400, "Invalid content length")
                 return
 
-            # Read POST data (multipart form data)
-            post_data = self.rfile.read(content_length).decode("utf-8", errors="ignore")
+            logging.info(f"Uploading file..")
 
-            # Split by boundary and extract parts
-            parts = post_data.split(f"--{boundary}")
+            # Read the entire POST data (multipart form data)
+            post_data = self.rfile.read(content_length)
+
+            # Split the data by the boundary to get the individual parts
+            parts = post_data.split(f"--{boundary}".encode())  # Boundary should be in bytes
+
+            # Remove the last part, which is typically the trailing boundary (empty part)
+            if parts[-1] == b'':
+                parts = parts[:-1]
+
             for part in parts:
-                if "Content-Disposition: form-data" in part and 'filename="' in part:
-                    # Extract filename from the part
-                    filename_start = part.find('filename="') + 10
-                    filename_end = part.find('"', filename_start)
-                    filename = part[filename_start:filename_end]
+                if b"Content-Disposition: form-data" in part and b'filename="' in part:
+                    # Extract the filename from the part
+                    filename_start = part.find(b'filename="') + 10
+                    filename_end = part.find(b'"', filename_start)
+                    filename = part[filename_start:filename_end].decode("utf-8")
 
-                    # If no filename found, continue to next part
+                    # If no filename found, continue to the next part
                     if not filename:
                         continue
 
-                    try:
-                        # Sanitize the filename
-                        sanitized_filename = sanitize_filename(filename)
-                    except ValueError:
-                        self.send_error(400, "Invalid filename")
-                        return
+                    sanitized_filename = sanitize_filename(filename)
 
-                    # Extract file content
-                    content_start = part.find("\r\n\r\n") + 4
-                    content_end = part.rfind("\r\n")
-                    file_content = part[content_start:content_end]
+                    # Extract the file content (after the headers)
+                    content_start = part.find(b"\r\n\r\n") + 4
+                    file_content = part[content_start:]
 
-                    # Save file
+                    # Remove any trailing CRLF or boundary markers if present
+                    if file_content.endswith(b"\r\n"):
+                        file_content = file_content[:-2]  # Remove the CRLF (0x0A0D)
+
+                    # Define the file path
                     os.makedirs(UPLOAD_DIRECTORY, exist_ok=True)
                     file_path = os.path.join(UPLOAD_DIRECTORY, sanitized_filename)
 
-                    logging.info(f"Starting upload of {sanitized_filename}...")
-
+                    # Write the file content to disk (binary mode)
                     try:
                         with open(file_path, "wb") as f:
-                            with tqdm(total=len(file_content), unit="B", unit_scale=True, desc=f"Uploading {sanitized_filename}", ncols=100) as progress:
-                                # Writing in chunks and updating progress
-                                chunk_size = 1024  # 1 KB per chunk
-                                for i in range(0, len(file_content), chunk_size):
-                                    chunk = file_content[i:i + chunk_size]
-                                    f.write(chunk.encode("utf-8", errors="ignore"))
-                                    progress.update(len(chunk))
+                            f.write(file_content)
 
-                        # Log upload
-                        logging.info(f"Uploaded: {sanitized_filename} (Size: {len(file_content)} bytes)")
-
-                        # Respond success
+                        # Send success response
                         self.send_response(201)
                         self.end_headers()
                         self.wfile.write(b"File uploaded successfully")
-                    except ConnectionResetError:
-                        logging.warning(f"Connection reset by peer while uploading {sanitized_filename}")
-                        self.send_error(500, "Connection reset by peer")
+
+                        # Log the success
+                        logging.info(f"Uploaded {sanitized_filename} successfully")
+
                     except Exception as e:
                         logging.error(f"Error while uploading {sanitized_filename}: {e}")
                         self.send_error(500, "Internal Server Error")
 
                     return
 
-            self.send_error(400, "File upload failed")
+            # If no file was found in the request, send an error
+            self.send_error(400, "No file found in the request")
         else:
             self.send_error(404)
+
 
 def monitor_keypress(stop_event):
     print("Press 'L' to list the current directory contents.")
