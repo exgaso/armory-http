@@ -111,22 +111,30 @@ class CustomHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
 
                     logging.info(f"Starting upload of {sanitized_filename}...")
 
-                    with open(file_path, "wb") as f:
-                        with tqdm(total=len(file_content), unit="B", unit_scale=True, desc=f"Uploading {sanitized_filename}", ncols=100) as progress:
-                            # Writing in chunks and updating progress
-                            chunk_size = 1024  # 1 KB per chunk
-                            for i in range(0, len(file_content), chunk_size):
-                                chunk = file_content[i:i + chunk_size]
-                                f.write(chunk.encode("utf-8", errors="ignore"))
-                                progress.update(len(chunk))
+                    try:
+                        with open(file_path, "wb") as f:
+                            with tqdm(total=len(file_content), unit="B", unit_scale=True, desc=f"Uploading {sanitized_filename}", ncols=100) as progress:
+                                # Writing in chunks and updating progress
+                                chunk_size = 1024  # 1 KB per chunk
+                                for i in range(0, len(file_content), chunk_size):
+                                    chunk = file_content[i:i + chunk_size]
+                                    f.write(chunk.encode("utf-8", errors="ignore"))
+                                    progress.update(len(chunk))
 
-                    # Log upload
-                    logging.info(f"Uploaded: {sanitized_filename} (Size: {len(file_content)} bytes)")
+                        # Log upload
+                        logging.info(f"Uploaded: {sanitized_filename} (Size: {len(file_content)} bytes)")
 
-                    # Respond success
-                    self.send_response(201)
-                    self.end_headers()
-                    self.wfile.write(b"File uploaded successfully")
+                        # Respond success
+                        self.send_response(201)
+                        self.end_headers()
+                        self.wfile.write(b"File uploaded successfully")
+                    except ConnectionResetError:
+                        logging.warning(f"Connection reset by peer while uploading {sanitized_filename}")
+                        self.send_error(500, "Connection reset by peer")
+                    except Exception as e:
+                        logging.error(f"Error while uploading {sanitized_filename}: {e}")
+                        self.send_error(500, "Internal Server Error")
+
                     return
 
             self.send_error(400, "File upload failed")
@@ -141,7 +149,7 @@ def monitor_keypress(stop_event):
             key = sys.stdin.read(1).strip()
             if key.upper() == 'L':
                 print("\nCurrent Directory Contents:")
-                for item in os.listdir('.'):
+                for item in sorted(os.listdir('.')):
                     print(f"  - {item}")
 
 def main():
@@ -161,8 +169,8 @@ def main():
     Handler = CustomHTTPRequestHandler
     
     try:
-        # Create the TCPServer with SO_REUSEADDR option
-        with socketserver.TCPServer(("", port), Handler) as httpd:
+        # Create the ThreadingTCPServer to handle multiple requests concurrently
+        with socketserver.ThreadingTCPServer(("", port), Handler) as httpd:
             # Allow the socket to be reused immediately after the server shuts down
             httpd.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             
