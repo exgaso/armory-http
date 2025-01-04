@@ -1,4 +1,4 @@
-# Progress HTTP Server
+# Armory HTTP Server
 
 A simple HTTP server with download progress bar and upload function. It's usefull for serving tools inside a directory on a server. It's a better alternative for `python -m http.sever 80`. Directory listing only from server-side.
 
